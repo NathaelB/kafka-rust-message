@@ -1,7 +1,15 @@
+mod handlers;
+mod responses;
+
+use std::sync::Arc;
+use crate::application::http::handlers::list_messages::list_servers;
 use anyhow::Context;
+use axum::Extension;
+use axum::routing::get;
 use log::info;
 use tokio::net;
 use tracing::info_span;
+use crate::domain::message::ports::MessageService;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HttpServerConfig {
@@ -14,13 +22,24 @@ impl HttpServerConfig {
     }
 }
 
+#[derive(Debug, Clone)]
+struct AppState<M>
+where
+    M: MessageService,
+{
+    message_service: Arc<M>,
+}
+
 pub struct HttpServer {
     router: axum::Router,
-    listener: net::TcpListener
+    listener: net::TcpListener,
 }
 
 impl HttpServer {
-    pub async fn new(config: HttpServerConfig) -> anyhow::Result<Self> {
+    pub async fn new<M>(config: HttpServerConfig, message_service: Arc<M>) -> anyhow::Result<Self>
+    where
+        M: MessageService,
+    {
         let trace_layer = tower_http::trace::TraceLayer::new_for_http().make_span_with(
             |request: &axum::extract::Request| {
                 let uri: String = request.uri().to_string();
@@ -28,8 +47,16 @@ impl HttpServer {
             },
         );
 
+        let state = AppState {
+            message_service,
+        };
+
+
         let router = axum::Router::new()
-            .layer(trace_layer);
+            .nest("", api_routes())
+            .layer(trace_layer)
+            .layer(Extension(Arc::clone(&state.message_service)))
+            .with_state(state);
 
         let listener = net::TcpListener::bind(format!("0.0.0.0:{}", config.port))
             .await
@@ -49,4 +76,11 @@ impl HttpServer {
 
         Ok(())
     }
+}
+
+fn api_routes<M>() -> axum::Router<AppState<M>>
+where
+    M: MessageService,
+{
+    axum::Router::new().route("/servers/:id/messages", get(list_servers::<M>))
 }

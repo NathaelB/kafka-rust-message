@@ -1,10 +1,10 @@
-use std::fmt::Debug;
-use std::future::Future;
+use crate::infrastructure::messaging::kafka::KafkaMessaging;
+use anyhow::Result;
 use clap::builder::PossibleValue;
 use clap::ValueEnum;
 use serde::de::DeserializeOwned;
-use crate::infrastructure::messaging::kafka::KafkaMessaging;
-use anyhow::Result;
+use std::fmt::Debug;
+use std::future::Future;
 
 #[derive(Debug, Clone)]
 pub enum MessagingType {
@@ -53,7 +53,6 @@ impl MessagingTypeImpl {
 
                 Ok(MessagingTypeImpl::Kafka(messaging))
             }
-
         }
     }
 }
@@ -75,8 +74,13 @@ impl MessagingPort for MessagingTypeImpl {
             MessagingTypeImpl::Kafka(messaging) => messaging.subscribe(topic, handler).await,
         }
     }
-}
 
+    async fn get_messages(&self, topic: String) -> Result<Vec<String>> {
+        match self {
+            MessagingTypeImpl::Kafka(messaging) => messaging.get_messages(topic).await,
+        }
+    }
+}
 
 pub trait MessagingPort: Clone + Send + Sync + 'static {
     fn publish_message(
@@ -93,4 +97,9 @@ pub trait MessagingPort: Clone + Send + Sync + 'static {
         F: Fn(T) -> Fut + Send + Sync + 'static,
         Fut: Future<Output = anyhow::Result<()>> + Send + 'static,
         T: DeserializeOwned + Send + Sync + Debug + Clone + 'static;
+
+    fn get_messages(
+        &self,
+        topic: String,
+    ) -> impl Future<Output = anyhow::Result<Vec<String>>> + Send;
 }
